@@ -1,0 +1,131 @@
+---
+name: getting-started
+description: First-run orientation for the claude-code-starter-kit plugin. Walks through what's included, where things live, and how to customize.
+---
+
+# Welcome to claude-code-starter-kit
+
+This is a guided first-run walkthrough. Read it once, then customize.
+
+## What you just installed
+
+A curated set of hooks, slash commands, agents, and skills for Claude Code, plus a CLAUDE.md framework. The goal: a calm, structured, partnership-style setup where Claude Code knows how to work with you, not just for you.
+
+**The architecture:**
+
+```
+You ──── CLAUDE.md (your instructions) ────────┐
+                                                ↓
+                                            Claude Code
+                                                ↓
+        ┌──────────────────┬──────────────────┐
+        │                  │                  │
+     Hooks         Slash Commands         Agents/Skills
+   (automation)    (your shortcuts)    (specialized work)
+```
+
+## Walk through it
+
+Tell the user (the human reading this):
+
+### 1. CLAUDE.md is the most important file
+
+Located at `~/.claude/CLAUDE.md`. It's loaded into every Claude Code session. The starter kit shipped with a template you can use as your starting point.
+
+**Action item:** Offer to copy the template to `~/.claude/CLAUDE.md` for the user (you have the plugin path; they don't). Then tell them to open it and fill in `[YOUR_NAME]` and the bracketed prompts (who they are, tone, partnership style). Tell them to spend 15 minutes on this — it's the highest-leverage time they'll spend on their setup.
+
+Explain that the template is short on purpose: it loads on every turn of every session, so it holds only how they work. Project facts go in each project's own CLAUDE.md (see `examples/layered-repo/` in the kit), and extra sections are in `docs/claude-md-section-library.md`. Once it's in place, ask them to run `/context` and confirm `~/.claude/CLAUDE.md` appears under **Memory files**.
+
+### 2. Hooks run automatically
+
+Hooks are scripts that run on Claude Code events. The kit installs:
+
+- **safety-net** — Blocks destructive shell commands (rm -rf on dangerous paths, force push to main, etc.)
+- **self-guard** — Prevents Claude from authoring foot-gun scripts without dry-run gates
+- **backup-before-edit** — Auto-backs up files before Claude edits them
+- **retry-nudge** — Coaches Claude to retry validation errors before escalating
+- **context-monitor** — Warns when context is getting low
+- **idle-summary** — When you return after >15min, prepends a "where we left off" summary
+- **session-end** — Logs every session for recovery
+- **user-prompt-context** — Injects active-context.md before every prompt
+- (...and a few more — see `hooks/scripts/`)
+
+You don't run these. They run themselves. Read `hooks/scripts/*.sh` if you want to understand what's happening.
+
+Only four are true safeguards: safety-net, self-guard, backup-before-edit and session-end. The rest are notifications or nudges, and turning one off loses no protection. `docs/context-budget-primer.md` has the full sort.
+
+### 3. Slash commands are your shortcuts
+
+Type these in Claude Code. (Installed plugin commands are namespaced, so they all start with `/kit:`.)
+
+- `/kit:session-end` — Log the session, update active-context for next time
+- `/kit:reflect` — End-of-session retrospective (quick or deep)
+- `/kit:debt` — Review operational debt items
+- `/kit:recall <topic>` — Search across past sessions for something
+- `/kit:maintain` — Periodic system health check
+- `/kit:note <text>` — Quick timestamped capture to today's notes
+- `/kit:decision <title>` — Log a structured decision with reasoning
+- `/kit:permissions-audit` — Review and prune settings.json permissions
+- `/kit:checkpoint` — Save mid-session state snapshot
+- `/kit:extract-skill` — Scaffold a new skill from an emerging pattern
+
+> This is a curated subset. The full list of all 15 commands lives in the README.
+
+### 4. Agents are specialists
+
+When a task is big enough, Claude can spawn an agent to handle it:
+
+- **investigator** — Read-only diagnosis with file-and-line evidence; never changes anything
+- **deep-research** — Multi-source research with confidence calibration
+- **strategic-reviewer** — Devil's advocate review of plans/proposals
+- **skill-diagnostics** — Debug skill triggering issues
+- **task-decomposition-expert** — Break complex goals into ordered steps
+- **communication-excellence-coach** — Email refinement, difficult conversations
+
+You don't usually invoke these directly — Claude picks them when appropriate.
+
+### 5. Skills are reusable knowledge
+
+Generic frameworks Claude loads on demand:
+
+- **humanizer** — Remove AI tells from writing
+- **learning-capture** — Pin valuable insights mid-conversation
+- **idea-to-scope** — Transform vague ideas into structured scope docs
+- **kaizen** — Continuous improvement framework
+- **bring-up-to-speed** — Brief someone on a project whose history is scattered across email, meetings and docs
+- **meeting-recap** — Turn a meeting transcript into a recap, delivered as an email draft or a note and never sent
+
+Each skill is a folder: a short `SKILL.md`, detail in `references/`, and test prompts in `evals/evals.json`. If you catch yourself explaining the same thing to Claude twice, `/kit:extract-skill` turns it into a skill.
+
+## Setup checklist
+
+Walk the user through this. **For each item, offer to do it for them** — most users don't want to type `cp` commands. The plugin variables (`$CLAUDE_PLUGIN_ROOT`) only resolve when Claude runs commands, not when the user runs them in a regular terminal.
+
+- [ ] Copy CLAUDE.md template to `~/.claude/CLAUDE.md` (offer to do it for them, then they edit)
+- [ ] Customize `~/.claude/CLAUDE.md` (`[YOUR_NAME]` and the bracketed prompts), then run `/context` to confirm it loaded
+- [ ] Optional: copy `MEMORY.md.template` to `~/.claude/MEMORY.md` as the index `/kit:reflect` and `/kit:recall` use for tactical pattern-tracking. Tell the user plainly: Claude Code doesn't load this file on its own. Its built-in auto memory is a separate `MEMORY.md` per project, in `~/.claude/projects/<project>/memory/`, which Claude writes and loads automatically.
+- [ ] Optionally install the statusline (offer to copy `examples/statusline.sh` to `~/.claude/statusline.sh` and chmod it executable)
+- [ ] Optionally add `statusLine` block to `~/.claude/settings.json`
+- [ ] Optional: set `"outputStyle": "Explanatory"` in `~/.claude/settings.json` for `★ Insight` boxes (built-in style — see `docs/output-styles-primer.md`)
+- [ ] Optional: configure Pushover for phone notifications (see `examples/pushover-setup.md`)
+- [ ] Optional: sync `/kit:debt` items to Notion — `examples/debt-sync.sh.opt-in` is the integration shape to implement your own sync
+- [ ] Optional: log `/kit:session-end` summaries to a Notion database — set the `notionSessionDb` key in `~/.claude/settings.json`
+- [ ] Run `/kit:verify` — the hook fire drill proves everything's wired and the safety hooks actually block
+- [ ] **First success moment:** ask the user to type `/kit:note testing the kit` — a timestamped line will land in `~/.claude/notes/YYYY-MM-DD.md`. That's a hook + a slash command + a file, all working together.
+
+## What to do if something feels wrong
+
+- Hooks too noisy? Edit `hooks/hooks.json` and remove what you don't want.
+- A slash command doesn't fit your workflow? Delete it from `commands/` or rewrite it.
+- Want to disable a hook temporarily? Add `IDLE_SUMMARY_DISABLE=1` (and similar) to your shell env.
+
+This is a starter kit, not a religion. Adapt it.
+
+## Where to go next
+
+- Read `docs/ARCHITECTURE.md` for the philosophy
+- Read `docs/output-styles-primer.md` for native output style options
+- Read `docs/plan-mode-primer.md` for when to use plan mode
+- Read `docs/worktrees-primer.md` for parallel work patterns
+
+Welcome aboard.

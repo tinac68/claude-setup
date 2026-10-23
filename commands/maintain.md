@@ -1,0 +1,217 @@
+---
+name: maintain
+description: Periodic system maintenance sweep — updates, health checks, cleanup
+argument-hint: "[full|quick]"
+---
+
+# System Maintenance: $ARGUMENTS
+
+Run a structured maintenance sweep of the development environment. This keeps tools current, catches drift, and prevents silent failures from accumulating between sessions. Recommended cadence: twice weekly.
+
+**Mode selection:**
+- If `$ARGUMENTS` is empty or "full": run all sections below
+- If `$ARGUMENTS` is "quick": run only Sections 2-3 (Claude Code + hook/script health checks — no package upgrades, no audits, nothing modified). Safe as a first-run wiring check. The monthly context readout in 2e still runs when it's due; it only writes to `~/.claude/context-log.md`.
+
+---
+
+## Section 1: Package Updates
+
+Check what's outdated first, then present a summary before upgrading anything.
+
+### 1a. Homebrew (macOS)
+```
+brew update
+brew outdated
+```
+Show the outdated list. If user approves, run `brew upgrade`. After upgrading, run `brew cleanup` to reclaim disk space.
+
+### 1b. Python (pipx)
+```
+pipx list --short
+```
+List installed pipx packages. If the user approves, run `pipx upgrade-all --include-injected`. Never upgrade without showing the list and asking first.
+
+**Note:** Modern Python (3.11+) enforces PEP 668 (externally-managed-environment), which blocks `pip list --outdated` and `pip install` against system Python. If you have Python 3.14 (latest stable as of 2026), this is strictly enforced. The migration path is pipx for user CLI tools — install it via brew (`brew install pipx`) if it's not already there. Library packages (lxml, python-docx, etc.) are dependencies of other tools and don't need direct upgrade — they refresh when their parent tool refreshes.
+
+### 1c. Node.js / npm globals
+```
+npm outdated -g
+```
+Show outdated global packages. Upgrade with approval.
+
+### 1d. Runtime versions
+```
+node --version
+python3 --version
+```
+Flag if either is more than one major version behind current stable.
+
+---
+
+## Section 2: Claude Code Health
+
+### 2a. Claude Code version
+```
+claude --version
+```
+Report current version. Note: Claude Code auto-updates via native installer, so this is informational. Flag if the version seems old.
+
+### 2b. MCP server status
+Check which MCP servers are configured and whether they respond:
+- Read MCP config from `~/.claude.json` and any `.mcp.json` files
+- For each server, note if it's configured and check for obvious issues (missing binaries, expired tokens)
+- Flag any servers that haven't been used recently or have known issues
+- If a server was added since the last run, ask the user to run `/context` and check the MCP tools line. A connected server costs context even when idle; suggest toggling unused ones off in `/mcp` rather than deleting them
+
+### 2c. Plugin health
+- List installed plugins (`/plugin` in Claude Code, or check `~/.claude/settings.json` `enabledPlugins`)
+- Check for any plugin updates available
+
+### 2d. New features & changelog
+Check what's new in Claude Code since the last maintenance run:
+1. Fetch `https://github.com/anthropics/claude-code/releases` via WebFetch
+2. Compare the latest release version against the current installed version
+3. Scan release notes for **new features, new flags, new plugin types, deprecations, and breaking changes**
+4. Present a summary:
+   - **New capabilities** — things the user can now do that they couldn't before
+   - **Breaking changes** — anything that might affect current setup
+   - **New docs pages** — topics that didn't exist before
+5. If any new capability is relevant to the user's workflows, flag it with a one-line "why this matters for you"
+
+### 2e. Monthly context readout (first run of each month, full or quick)
+`/context` is a command only the user can type, so this step is a handoff:
+1. Read `~/.claude/context-log.md`. If the newest entry is from this calendar month, skip this step and say so.
+2. Ask the user: *"Please run `/context` and paste the output here."*
+3. Log one dated entry to `~/.claude/context-log.md` (create it if missing) with the token total for each category: system prompt, system tools, MCP tools, custom agents, memory files, skills, messages, free space. Also list the files under **Memory files**.
+4. Compare with the previous entry. Flag any category the user controls (memory files, custom agents, skills, MCP tools) that grew by more than 20%, and any CLAUDE.md over ~200 lines (user file over ~60).
+5. Suggest one concrete trim for the biggest controllable category, e.g. move a project-specific section out of the user CLAUDE.md, shorten a long agent description, toggle off an unused MCP server. See `docs/context-budget-primer.md` in the kit.
+
+### 2f. Instruction tune-up (first run of each month)
+Claude Code has a built-in checker for instructions written for older models: `/doctor prompt-audit` (Claude Code 2.1.283 or later). It reviews CLAUDE.md, skills, agents and commands. Like `/context`, only the user can type it:
+1. Ask the user: *"Monthly tune-up: please run `/doctor prompt-audit` and paste the result here."*
+2. Sort what it flags into **quick fixes** (outdated phrasing, instructions the model now follows by default) and **judgment calls** (anything that changes behavior). Offer to apply the quick fixes. Ask before touching the judgment calls.
+3. If the command doesn't exist, say the user's Claude Code version is older than 2.1.283 and skip this step.
+
+---
+
+## Section 3: Hook & Script Health
+
+### 3a. Hook scripts
+For every hook configured in `~/.claude/settings.json` and any plugin `hooks.json`:
+- Verify the script file exists at the specified path
+- Verify it's executable (`chmod +x`)
+- Run a basic syntax check (`bash -n <script>`)
+- Flag any hooks that reference files or commands that don't exist
+
+### 3b. Statusline
+- Verify `~/.claude/statusline.sh` exists, is executable, and passes syntax check
+- Test it with a mock JSON input to verify it produces output without errors
+
+### 3c. Plugin integrity
+Validate every installed plugin with Claude Code's own checker. This matters because a plugin whose hooks can't load still shows as **enabled with no error** in `/plugin` and `claude plugin list`. That's how the kit's 0.2.0 hooks went unnoticed.
+
+```
+claude plugin list --json | jq -r '.[] | select(.enabled) | .installPath // empty' | while read -r p; do
+  claude plugin validate --strict "$p" >/dev/null 2>&1 && echo "ok    $p" || echo "FAIL  $p"
+done
+```
+
+- For each FAIL, re-run `claude plugin validate "<path>"` without `--strict` and show the errors in plain language. Errors mean part of that plugin isn't loading; warnings alone are degradations. The usual fix is updating it: `claude plugin update <name>@<marketplace>` in a terminal (or `/plugin` → **Installed** → the plugin → **Update now**), then restart Claude Code. If it still fails after updating, the plugin itself is broken: tell the user and offer to draft a bug report to its author.
+- Run `/kit:verify` (the hook fire drill) and report its PASS/FAIL count.
+- Check that plugin paths in settings.json point to existing directories
+
+---
+
+## Section 4: Repository Audit (skip in quick mode)
+
+### 4a. Secrets exposure scan (CRITICAL — never skip in full mode)
+For each user-owned repo (typically under `~/Projects/` or similar):
+```
+gitleaks detect --source <repo> --no-banner --no-git -r /tmp/leaks-$(basename <repo>).json 2>/dev/null
+gitleaks detect --source <repo> --no-banner -r /tmp/leaks-history-$(basename <repo>).json 2>/dev/null
+```
+The first scans the working tree; the second scans git history.
+
+If ANY findings: this is a **CREDENTIAL ROTATION EVENT**. Flag prominently with:
+- Repo name + file path + secret type (don't echo the secret value back)
+- Recommended remediation: rotate the credential, then clean history with BFG or git-filter-repo, then force-push
+
+(Requires `gitleaks` installed. Skip with note if not available.)
+
+### 4b. Uncommitted work across projects
+Scan the user's project root for repos with:
+- Uncommitted changes (dirty working tree)
+- Unpushed commits on any branch
+- Branches with no upstream tracking
+
+Present a summary table:
+| Repo | Status | Unpushed | Dirty Files |
+|------|--------|----------|-------------|
+
+### 4c. Stale repos
+Check `git log -1 --format=%cr` for last commit date. Flag repos with no commits in 60+ days as candidates for review.
+
+---
+
+## Section 5: Credential & Token Health (skip in quick mode)
+
+### 5a. API keys
+- Verify `~/.env.local` exists if user has hooks that depend on it
+- Do NOT display key values — just confirm they exist and are non-empty
+- If Pushover is configured, send a test notification ("Maintenance check — credentials OK")
+
+### 5b. OAuth tokens
+- Check any OAuth tokens (e.g., Google API token files) for expiry
+- Test with a lightweight API call if possible
+
+---
+
+## Section 6: Cleanup (skip in quick mode)
+
+### 6a. Stale backup files
+The `backup-before-edit` hook creates timestamped copies before every edit. Ask the user where their projects live if you don't know (common: `~/Projects`, `~/code`, `~/dev`), then:
+```
+find <projects-dir> -path "*/_backups/*" -mtime +14 -type f
+find ~/.claude -path "*/_backups/*" -mtime +14 -type f
+```
+Show count and total size of backups older than 14 days. Offer to delete with approval.
+
+### 6b. Stale session temp files
+```
+find /tmp -name "claude-ctx-*" -mtime +1 2>/dev/null
+find /tmp -name "claude-pushover-*" -mtime +1 2>/dev/null
+```
+Show count. Offer to clean up.
+
+### 6c. Disk space check
+```
+df -h /
+du -sh ~/.claude/ 2>/dev/null
+```
+Flag if disk is above 85% full or `~/.claude/` is unusually large.
+
+---
+
+## Presentation
+
+After all checks complete, present a maintenance summary:
+
+```
+MAINTENANCE SUMMARY — [date]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚨 Secrets exposure:   Clean / N findings (ROTATION REQUIRED)
+Packages updated:    X of Y outdated packages upgraded
+Hooks:               All OK / N issues found
+Plugins:             N validated, all load / N failing (named)
+MCP servers:         All responding / N issues
+Context readout:     Logged (biggest controllable: X) / Already done this month
+Repos:               X with uncommitted work / Y stale (60d+)
+Credentials:         All valid / N expired
+Cleanup:             Xmb recovered / nothing to clean
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Next maintenance:    [date + 3-4 days]
+```
+
+If Secrets row is non-zero, surface it as the top action item before any other reporting.
+
+If any issues were found that couldn't be auto-fixed, list them as action items at the bottom.
